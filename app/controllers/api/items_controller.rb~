@@ -1,0 +1,159 @@
+class Api::ItemsController < Api::BaseController
+
+
+  def show
+    require 'geokit'
+     location = Geokit::Geocoders::MultiGeocoder.geocode("103.224.165.41")
+     render json: {:location => location, :ip => request.remote_ip } and return
+  end
+  
+  def isbn_finder
+    require 'net/http'
+   
+
+	 uri = URI.parse('https://www.googleapis.com/books/v1/volumes?q='+ params[:isbn])
+	 res = Net::HTTP.get_response(uri)
+ 	 
+	 hash = JSON.parse(res.body)
+	 book_items   = []
+    if hash["totalItems"] > 0
+		
+		
+		
+		hash["items"].each do | item|
+		
+			book_item = {}
+			book_item["title"] = item["volumeInfo"]["title"]
+			book_item["subtitle"] = item["volumeInfo"]["title"]
+			book_item["description"] = item["volumeInfo"]["description"]
+			book_item["page_count"] = item["volumeInfo"]["pageCount"]
+			book_item["publisher"] = item["volumeInfo"]["publisher"]
+			book_item["picture"]  = "https://books.google.com/books/content/images/frontcover/" + item["id"] + "?fife=w600";
+			book_item["authors"]   =  item["volumeInfo"]["authors"]
+			book_item["categories"]   =  item["volumeInfo"]["categories"]
+			book_items << book_item
+		end
+		
+		render json: book_items and return
+		
+      picture = ItemPicture.new
+      picture.item_id = item.id
+      picture.avatar  = URI.parse("https://books.google.com/books/content/images/frontcover/" + json_item["id"] + "?fife=w600")
+      picture.save
+
+		
+		#
+		#item.category
+    end 
+	 
+    render json: book_items and return
+  end
+  
+
+  def index
+    sort = params[:sort].presence || "newest"
+    limit     = params[:limit].nil? ? 10 : params[:limit].to_i
+    page     = params[:page].nil? ? 1 : params[:page].to_i
+    offset = (page -1)*limit
+    feeds = []
+    if sort == "closest"
+       if params[:geolocation].present?
+         location = params[:geolocation].split(",")
+         somewhere = [location[0], location[1]]
+	   else
+         location = Geokit::Geocoders::MultiGeocoder.geocode(request.remote_ip)
+         somewhere = [location.lat, location.lng]
+	   end
+       
+       feeds  = Item.by_distance(:origin => somewhere).where("is_active = 1 AND (is_spam = 0 OR is_spam IS NULL) AND country_id = ? AND state_id = ?", current_user.try(:country_id), current_user.try(:state_id) )
+                .limit(limit)
+                .offset(offset)
+      
+
+
+    elsif sort == "popular"
+      feeds = Item.joins(" INNER JOIN votes ON items.id = votes.votable_id AND votes.votable_type='Item'  AND votes.vote_flag =1").select("count(*) as counter,items.*").where("is_active = 1 AND (is_spam = 0 OR is_spam IS NULL) AND country_id = ? AND state_id = ?", current_user.try(:country_id), current_user.try(:state_id) ).group("votes.votable_id").order("count(*) DESC")
+                .limit(limit)
+                .offset(offset)
+    else
+       feeds = Item.where("is_active = 1 AND (is_spam = 0 OR is_spam IS NULL) AND country_id = ? AND state_id = ?", current_user.try(:country_id), current_user.try(:state_id) )
+		.order("id DESC")
+                .limit(limit)
+                .offset(offset)
+    end
+   
+
+
+    if feeds.any?
+
+      render  json: feeds.map { |f| f.json_format(current_user) }  and return
+    else
+      render json: "nothing found" and return
+      #render status: 204, json: { error: 'End of feed' }
+    end
+
+  end
+
+
+  def create
+
+      item 		= Item.new items_params
+      item.state_id 	= current_user.try(:state_id)
+      item.country_id 	= current_user.try(:country_id)
+      item.user_id 	= current_user.try(:id)
+      
+      if params[:geolocation].present?
+         location = Geokit::Geocoders::MultiGeocoder.geocode(params[:geolocation])
+      else
+         location = Geokit::Geocoders::MultiGeocoder.geocode(request.remote_ip)
+      end
+      item.latitude  = location.try(:lat)
+      item.longitude = location.try(:lng)
+      item.location  = (location.try(:street_address) || "" ) + "" +  (location.try(:city) || "" )
+      
+      item.is_active 	= true
+      if item.save
+        if params[:image1].present?
+          picture = ItemPicture.new
+          picture.item_id = item.id
+          picture.avatar  = params[:image1]
+          picture.save
+
+          if params[:image2].present?
+            picture = ItemPicture.new
+            picture.item_id = item.id
+            picture.avatar  = params[:image2]
+            picture.save
+
+            if params[:image3].present?
+              picture = ItemPicture.new
+              picture.item_id = item.id
+              picture.avatar  = params[:image3]
+              picture.save
+            end
+
+          end
+
+
+        end
+
+        render :status => 200, json: t(:item_posted)
+      else
+        render :status => 400, json: t(:error_occured)
+      end
+
+
+  end
+
+  def update
+
+  end
+
+
+
+  def items_params
+
+    params.require(:item).permit(:item_type, :title, :description, :state_id,:country_id,:user_id, :exchanged_at , :location, :latitude, :longitude )
+  end
+
+end

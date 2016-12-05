@@ -1,0 +1,2 @@
+class VaultDragonVersion < ApplicationRecord
+end

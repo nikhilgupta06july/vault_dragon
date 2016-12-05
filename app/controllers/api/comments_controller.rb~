@@ -1,0 +1,26 @@
+class Api::CommentsController < Api::BaseController
+  
+
+  def create
+      item  =Item.find(params[:id])
+     
+      comment = item.comments.create
+      comment.title = params[:locale] || "en"
+      comment.comment = params[:comment]
+      comment.user_id = current_user.try(:id)
+      comment.save
+      render status: 200, json: {:message => t(:commented)}
+  end
+  def show
+    
+     limit     = params[:limit].nil? ? 10 : params[:limit].to_i
+     page     = params[:page].nil? ? 1 : params[:page].to_i
+     offset = (page -1)*limit
+
+     item = Item.find(params[:id])
+     comments = item.comments.recent.limit(limit).offset(offset).all
+     render status: 200, json: comments.map { |f| f.as_json() }  and return
+     
+  end
+  
+end

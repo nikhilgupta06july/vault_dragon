@@ -1,0 +1,122 @@
+class Api::UsersController < Api::BaseController
+  skip_before_action :authenticate_api, only: [:create, :logout, :authenticate_user, :facebook_user,:subscribe]
+
+  def show
+
+
+    render json: @user.json_format
+  end
+
+  def logout
+      sign_out(current_user)
+      session[:discount_code] = nil
+      render status: 200, nothing: true and return
+  end
+
+  def create
+    user = User.find_by_email(params[:user][:email])
+
+    if params[:user][:facebook_id].present?
+      #
+      facebook_user
+    elsif user.present?
+        render :status => 403, text: t(:email_exists)
+    else
+      #render json: params[:user] and return
+      user = User.new users_params
+      if user.save
+
+        if params[:referal_code].present?
+          other_user = User.where(:referal_code => params[:referal_code]).first
+          if other_user.present?
+            user_share = UserShare.new
+            user_share.user_id = other_user.try(:id)
+            user_share.source = "referal-code"
+            user_share.connected_user_id = user.try(:id)
+            if user_share.save
+              user.credit = (user.try(:country).try(:credit_on_register).presence || CREDIT_ON_REGISTER)
+              user.save
+            end
+          end
+        end
+
+        render :json => user.json_format
+      else
+        render :status => 400, json: t(:could_not_register)
+      end
+    end
+
+    #rescue
+    #  render :status => 500, text: t(:server_error)
+
+  end
+
+  def update
+    #render json: params and return
+    user = current_user
+    if user.update_attributes(params[:user])
+      render :json => user.json_format
+    else
+      render :status => 400, text: params[:user].to_json
+    end
+  end
+
+  def subscribe
+    require 'securerandom'
+    random_string = SecureRandom.hex
+  	 user= User.new
+  	 user.email = params[:email]
+  	 user.password = random_string
+  	 
+  	 render :json => {:staus => user.save } and return
+  end
+  def facebook_user
+    user_by_mail = nil
+    user = User.find_by_facebook_id(params[:user][:facebook_id])
+    if user.nil?
+      user_by_mail =User.find_by_email(params[:user][:email])
+    end
+    if !user.present? && !user_by_mail.present?
+
+      user = User.new users_params
+      if user.save
+
+       if params[:referal_code].present?
+          other_user = User.where(:referal_code => params[:referal_code]).first
+          if other_user.present?
+            user_share = UserShare.new
+            user_share.user_id = other_user.try(:id)
+            user_share.source = "referal-code"
+            user_share.connected_user_id = user.try(:id)
+            if user_share.save
+              user.credit = (user.try(:country).try(:credit_on_register).presence || CREDIT_ON_REGISTER)
+              user.save
+            end
+          end
+        end
+
+        render :json => user.json_format
+      else
+        render :status => 400, json: user.errors #t(:could_not_register)
+      end
+
+    elsif user.present?
+      sign_in(user)
+
+      render :json => user.json_format
+    elsif user_by_mail.present?
+      user_by_mail.facebook_id = params[:user][:facebook_id]
+      user_by_mail.save
+      sign_in(user_by_mail)
+
+      render :json => user_by_mail.json_format
+    end
+
+  end
+
+
+  def users_params
+    params.require(:user).permit(:first_name, :last_name, :email, :password,:avatar,:mobile_number, :country_id , :facebook_id, :state_id )
+  end
+
+end
